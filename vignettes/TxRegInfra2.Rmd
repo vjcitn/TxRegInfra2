@@ -1,0 +1,296 @@
+---
+title: "TxRegInfra2: support for TxRegQuery"
+author: "Vincent J. Carey, stvjc at channing.harvard.edu"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+vignette: >
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteIndexEntry{TxRegInfra2 -- classes and methods for TxRegQuery}
+  %\VignetteEncoding{UTF-8}
+output:
+  html_document:
+    highlight: pygments
+    number_sections: yes 
+    theme: united
+    toc: yes 
+---
+
+```{r setup,echo=FALSE,results="hide", eval=TRUE}
+suppressPackageStartupMessages({
+library(TxRegInfra2)
+library(GenomicFiles)
+library(TFutils)
+})
+```
+
+# Introduction
+
+TxRegQuery addresses exploration of transcriptional regulatory networks
+by integrating data on eQTL, digital genomic footprinting (DGF), DnaseI
+hypersensitivity binding data (DHS), and transcription
+factor binding site (TFBS) data.  Owing to the volume of emerging tissue-specific
+data, special data modalities are used.
+
+# Managing bed file content with mongodb
+
+## Querying the `txregnet` database
+
+We have a long-running server that will respond to queries.
+We focus on the CRAN package mongolite as the interface.
+
+### The connection 
+
+```{r lkmong, eval=TRUE}
+suppressPackageStartupMessages({
+library(TxRegInfra2)
+library(mongolite)
+library(TnT)
+library(EnsDb.Hsapiens.v75)
+library(BiocParallel)
+register(SerialParam())
+})
+con1 = mongo(url=URL_txregLocal(), db="txregnet")
+con1
+```
+We will write methods that work with the 'fields' of this object.
+
+There is not much explicit reflectance in the mongolite API.
+The following is improvised and may be fragile:
+```{r lkpar, eval=TRUE}
+parent.env(con1)$orig
+```
+
+### Queries and aggregation
+
+If the `mongo`
+utility is available as a system
+command, we can get a list of collections in the database
+as follows.
+```{r getl, eval=FALSE}
+if (verifyHasMongoCmd()) {
+  listAllCollections(url=URL_txregLocal(), db="txregnet")
+  }
+```
+Otherwise, if `mongolite` is installed,
+as long as we know the collection names of interest, we
+can use them as noted throughout this vignette.
+
+We can get a record from a given collection:
+```{r getl2, eval=TRUE}
+mongo(url=URL_txregLocal(), db="txregnet", 
+   collection="Lung_allpairs_v7_eQTL")$find(limit=1)
+```
+Queries can be composed using JSON.  We have a tool
+to generate queries that employ the mongodb aggregation
+method.  Here we demonstrate this by computing, for each
+chromosome, the count and
+minimum values of the footprint statistic on CD14 cells.
+
+```{r doagg, eval=TRUE}
+m1 = mongo(url = URL_txregLocal(), db = "txregnet",  collection="fPlacenta_DS20346_hg19_FP")
+newagg = makeAggregator( by="chr", vbl="stat", op="$min", opname="min")
+```
+The JSON layout of this aggregating query is
+```
+[
+  {
+    "$group": {
+      "_id": ["$chr"],
+      "count": {
+        "$sum": [1]
+      },
+      "min": {
+        "$min": ["$stat"]
+      }
+    }
+  }
+] 
+```
+Invocation returns a data frame:
+```{r lkagggg, eval=TRUE}
+head(m1$aggregate(newagg))
+```
+
+
+# An integrative container
+
+We need to bind the metadata and information about the mongodb.
+
+## Sample metadata
+
+The following turns a very ad hoc filtering of the collection names
+into a DataFrame.
+
+```{r getcold, eval=TRUE}
+cd = TxRegInfra2::basicColData.tiny
+head(cd,2)
+```
+
+## Extended RaggedExperiment
+
+```{r domor1, eval=TRUE}
+rme0 = RaggedMongoExpt(con1, colData=cd)
+rme1 = rme0[, which(cd$type=="FP")]
+```
+
+A key method in development is subsetting the archive by genomic coordinates.
+
+```{r lksb, cache=FALSE, eval=TRUE}
+si = GenomeInfoDb::Seqinfo(genome="hg19")["chr17"] # to fix query genome
+myg = GRanges("chr17", IRanges(38.07e6,38.09e6), seqinfo=si)
+s1 = sbov(rme1, myg, simplify=FALSE)
+s1
+#dim(sa <- sparseAssay(s1, 3))  # compact gives segfault
+sa = as(s1, "GRangesList")
+sa
+```
+
+# Visualizing coincidence
+
+```{r mym, eval=TRUE, fig.height=6}
+ormm = txmodels("ORMDL3", plot=FALSE, name="ORMDL3")
+#sar = strsplit(rownames(sa), ":|-")
+dat = unlist(sa)
+dat$score = 1-dat$stat
+dat = split(dat, names(dat))
+dat[[1]]$value = dat[[1]]$score # for TnT
+dat[[2]]$value = dat[[2]]$score
+d1 = dat[[1]]
+width(d1) = 1
+d2 = dat[[2]]
+width(d2) = 1
+names(d1) = seq_len(length(d1)) # for TnT, can't have duplicated rownames
+names(d2) = seq_len(length(d2))
+pt1 = PinTrack(d1)
+pt2 = PinTrack(d2)
+data(tnt_genetrack_hg19)
+data(tnt_txtrack_hg19)
+vr = GRanges("chr17", IRanges(38.05e6, width=50000))
+TnTGenome(list(pt1,pt2,tnt_genetrack_hg19,tnt_txtrack_hg19), view.range=vr)
+```
+
+# Higher-level work with `sbov`
+
+## Building annotated GRanges for a selected target interval
+We begin with three 'single-concept' assays with relevance
+to lung genomics.  The v7 GTEx lung eQTL data, an encode DnaseI
+narrowPeak report on lung fibroblasts, and a digital genomic
+footprint report for fetal lung.
+```{r lksbovs}
+lname_eqtl = "Lung_allpairs_v7_eQTL"
+lname_dhs = "ENCFF001WBZ_hg19_HS" # see dnmeta, fibroblast of lung
+lname_fp = "fLung_DS14724_hg19_FP"
+si17 = GenomeInfoDb::Seqinfo(genome="hg19")["chr17"]
+si17n = si17
+GenomeInfoDb::seqlevelsStyle(si17n) = "NCBI"
+s1 = sbov(rme0[,lname_eqtl], GRanges("17", IRanges(38.06e6, 38.15e6),
+    seqinfo=si17n))
+s2 = sbov(rme0[,lname_dhs], GRanges("chr17", IRanges(38.06e6, 38.15e6),
+   seqinfo=si17))
+s3 = sbov(rme0[,lname_fp], GRanges("chr17", IRanges(38.06e6, 38.15e6),
+   seqinfo=si17))
+```
+Now we have annotated GRanges for each assay.  The eQTL data
+in part are:
+```{r lkeeee}
+names(mcols(s1))
+head(s1[, c("gene_id", "variant_id", "maf", "pval_nominal")])
+```
+The names of genes and variants used here are cumbersome -- symbols
+and rsids are preferable.
+```{r doadd}
+addsyms = function(x, EnsDb=EnsDb.Hsapiens.v75::EnsDb.Hsapiens.v75) {
+  ensids = gsub("\\..*", "", x$gene_id) # remove post period
+  gns = genes(EnsDb)
+  x$symbol = gns[ensids]$symbol
+  x
+}
+s1 = addsyms(s1)
+```
+Note that it is possible to retrieve rsids for the SNPs
+by address.  But this is a slow operation involving a huge
+SNPlocs package that we do not want to work with directly
+for this vignette.
+```
+> snpsByOverlaps(SNPlocs.Hsapiens.dbSNP144.GRCh37, s1b)
+UnstitchedGPos object with 265 positions and 2 metadata columns:
+        seqnames       pos strand |   RefSNP_id alleles_as_ambig
+           <Rle> <integer>  <Rle> | <character>      <character>
+    [1]       17  38061054      * |  rs36049276                R
+    [2]       17  38061439      * |   rs4795399                Y
+    [3]       17  38062196      * |   rs2305480                R
+    [4]       17  38062217      * |   rs2305479                Y
+    [5]       17  38062503      * |  rs35104165                Y
+    ...      ...       ...    ... .         ...              ...
+  [261]       17  38149258      * |  rs58212353                K
+  [262]       17  38149350      * |   rs8073254                V
+  [263]       17  38149411      * |  rs34648856                R
+  [264]       17  38149724      * |   rs3785549                Y
+  [265]       17  38149727      * |   rs3785550                H
+  -------
+  seqinfo: 25 sequences (1 circular) from GRCh37.p13 genome
+```
+
+## A bipartite graph for eQTL-gene relationships
+
+The object `s1` computed above is available as
+`demo_eQTL_granges`.  We convert it to a graph via
+```{r lkgr}
+library(graph)
+g1 = sbov_to_graphNEL(demo_eQTL_granges)
+g1
+```
+Nodes are SNPs and genes, edges are present when
+the resource (in this case the GTEx lung study)
+declares an association (in this case, an FDR for
+SNP-gene association not exceeding 0.10.)  The
+`graph` library includes functions
+for creation of incidence matrices from graphs, and
+vice versa.
+
+## Connecting eQTL-SNPs via DHS and DGF
+
+Given the GRanges representations for `sbov` results,
+we can use overlap computations to conveniently
+identify relationships between eQTL SNPs, genes,
+and hypersensitivity or footprint regions.
+
+We use `sbov_output_HS` as a persistent instance of
+`s2` computed above.
+
+```{r doov}
+seqlevelsStyle(demo_eQTL_granges) = "UCSC" # Fails xmas 2020
+seqlevels(demo_eQTL_granges) = "chr17"
+fo1 = findOverlaps(demo_eQTL_granges, sbov_output_HS)
+fo1 
+eq_by_hs = split(demo_eQTL_granges[queryHits(fo1)],
+   subjectHits(fo1))
+eq_by_hs
+```
+
+This shows that there are two DHS sites that overlap
+with SNPs showing eQTL associations with various genes.
+
+For the footprint data, we have:
+```{r doov2}
+fo2 = findOverlaps(demo_eQTL_granges, sbov_output_FP)
+fo2 
+eq_by_fp = split(demo_eQTL_granges[queryHits(fo2)],
+   subjectHits(fo2))
+eq_by_fp
+```
+
+## Relationships to FIMO-based TFBS
+
+We have a small number of cloud-resident FIMO search
+results through the `TFutils` package.
+
+```{r dotfs}
+library(TFutils)
+data(demo_fimo_granges)
+seqlevelsStyle(demo_eQTL_granges) = "UCSC"
+lapply(demo_fimo_granges, lapply, function(x) 
+   subsetByOverlaps(demo_eQTL_granges, x))
+```
+
+
+
