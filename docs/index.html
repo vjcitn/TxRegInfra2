@@ -96,7 +96,10 @@
 <div id="txreginfra" class="section level1">
 <div class="page-header"><h1 class="hasAnchor">
 <a href="#txreginfra" class="anchor"></a>TxRegInfra</h1></div>
-<p>Some Bioconductor-oriented infrastructure for TxRegQuery</p>
+<p>Some Bioconductor-oriented infrastructure for exploring transcriptional regulatory networks.</p>
+<p>Data from studies of eQTL, DNAse footprinting and hotspot location, and sequence-based TF binding are collected in a MongoDB database.</p>
+<p>A small example of such a database is available in a <a href="https://drive.google.com/drive/folders/1fR9DTypKWrUmEnbjiIy_n--9EZJ6AHci?usp=sharing">google drive</a>. The file <code>txreg_tiny.zip</code> unzips to a folder <code>VJCDUMP</code>, which is the result of a <code>mongodump</code> process.</p>
+<p>On a system with a running mongodb instance, <code>mongorestore</code> can be used with standard connection string and the path to the <code>VJCDUMP</code> folder as second argument to populate MongoDB collections for use with this package.</p>
 </div>
   </div>
 
