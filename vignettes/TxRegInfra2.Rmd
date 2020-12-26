@@ -30,12 +30,13 @@ hypersensitivity binding data (DHS), and transcription
 factor binding site (TFBS) data.  Owing to the volume of emerging tissue-specific
 data, special data modalities are used.
 
-# Managing bed file content with mongodb
+# Managing heterogeneous file content with mongodb
 
 ## Querying the `txregnet` database
 
-We have a long-running server that will respond to queries.
-We focus on the CRAN package mongolite as the interface.
+The README.md for this package describes how to populate a MongoDB
+instance with demonstrative data.
+We focus on the CRAN package mongolite as the interface to this data.
 
 ### The connection 
 
@@ -48,18 +49,19 @@ library(EnsDb.Hsapiens.v75)
 library(BiocParallel)
 register(SerialParam())
 })
-con1 = mongo(url=URL_txregLocal(), db="txregnet")
+con1 = mongo(url=URL_txregLocal(), 
+   db="txregnet", collection="Lung_allpairs_v7_eQTL")
 con1
 ```
-We will write methods that work with the 'fields' of this object.
+We will write methods that work with the 'fields' of objects like this.
 
 There is not much explicit reflectance in the mongolite API.
-The following is improvised and may be fragile:
-```{r lkpar, eval=TRUE}
+The following can provide some information if needed.
+```{r lkpar, eval=FALSE}
 parent.env(con1)$orig
 ```
 
-### Queries and aggregation
+## Queries and aggregation
 
 If the `mongo`
 utility is available as a system
