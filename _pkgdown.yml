@@ -1,0 +1,17 @@
+url: https://vjcitn.github.io/TxRegInfra2
+
+template:
+  params:
+    bootswatch: flatly
+    ganalytics: UA-93043521-1
+
+home:
+  title: "TxRegInfra2: MongoDB-based infrastructure for transcriptional network analysis"
+  type: inverse
+
+
+navbar:
+  right:
+   - icon: fa-github
+     href: https://github.com/vjcitn/TxRegInfra2
+
