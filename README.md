@@ -1,4 +1,4 @@
-# TxRegInfra
+# TxRegInfra2
 
 Some Bioconductor-oriented infrastructure for exploring transcriptional regulatory networks.
 
